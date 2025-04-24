@@ -1,0 +1,101 @@
+---
+# Tasks for Bioconductor sync
+
+- name: Check for rsync.pem SSH key
+  ansible.builtin.stat:
+    path: ~/.ssh/rsync.pem
+  register: rsync_key
+
+- name: Fail if SSH key is missing
+  ansible.builtin.fail:
+    msg: "Required SSH key not found at ~/.ssh/rsync.pem. Please add the key before continuing."
+  when: not rsync_key.stat.exists
+
+- name: Check SSH key permissions
+  ansible.builtin.file:
+    path: ~/.ssh/rsync.pem
+    mode: '0600'
+  when: rsync_key.stat.exists
+
+- name: Check for rclone installation
+  ansible.builtin.command: which rclone
+  register: rclone_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Install rclone if not present
+  block:
+    - name: Download rclone install script
+      ansible.builtin.get_url:
+        url: https://rclone.org/install.sh
+        dest: /tmp/rclone_install.sh
+        mode: '0755'
+      
+    - name: Run rclone installer
+      ansible.builtin.command: /tmp/rclone_install.sh
+      become: yes
+  when: rclone_check.rc != 0
+
+- name: Check for rclone config
+  ansible.builtin.stat:
+    path: ~/.rclone.conf
+  register: rclone_config
+
+- name: Fail if rclone config is missing
+  ansible.builtin.fail:
+    msg: "Rclone configuration not found at ~/.rclone.conf. Please set up rclone configuration first."
+  when: not rclone_config.stat.exists
+
+- name: Check if OSN remote exists in rclone config
+  ansible.builtin.shell: grep -q "\[osn\]" ~/.rclone.conf
+  register: osn_remote_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Fail if OSN remote is not configured
+  ansible.builtin.fail:
+    msg: "The [osn] remote is not configured in your rclone.conf. Please configure the OSN remote first."
+  when: osn_remote_check.rc != 0
+
+- name: Create target directory
+  ansible.builtin.file:
+    path: "{{ target_dir }}/{{ bioc_version }}"
+    state: directory
+    mode: '0755'
+
+- name: Create file list
+  ansible.builtin.template:
+    src: file_list.txt.j2
+    dest: "{{ target_dir }}/file_list.txt"
+
+- name: Create rsync script
+  ansible.builtin.copy:
+    dest: "{{ target_dir }}/rsync_copy.sh"
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      cd {{ target_dir }}
+      cat file_list.txt | xargs -i bash -c 'mkdir -p {}'
+      cat file_list.txt | xargs -i bash -c "rsync -e 'ssh -i ~/.ssh/rsync.pem' -zrtlv --delete bioc-rsync@master.bioconductor.org:{} {}"
+  register: rsync_script
+
+- name: Execute rsync copy
+  ansible.builtin.shell: "{{ target_dir }}/rsync_copy.sh"
+  register: rsync_result
+  args:
+    executable: /bin/bash
+
+- name: Create rclone copy script
+  ansible.builtin.copy:
+    dest: "{{ target_dir }}/rclone_copy.sh"
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      cd {{ target_dir }}
+      cat file_list.txt | xargs -i rclone copyto -vvv ./{} osn:/bir190004-bucket01/archive.bioconductor.org/packages/{}
+
+- name: Execute rclone copy
+  ansible.builtin.shell: "{{ target_dir }}/rclone_copy.sh"
+  register: rclone_result
+  args:
+    executable: /bin/bash

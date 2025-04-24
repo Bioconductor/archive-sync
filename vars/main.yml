@@ -1,0 +1,5 @@
+---
+# Variables
+ssh_user: ubuntu  # default, override as needed
+bioc_version: "3.20"  # The Bioconductor version to sync
+target_dir: "archive-move"  # The target directory for the sync

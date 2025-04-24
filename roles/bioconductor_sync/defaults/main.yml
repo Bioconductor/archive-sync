@@ -1,0 +1,4 @@
+---
+# Defaults
+bioc_version: "3.20"
+target_dir: "archive-move"
