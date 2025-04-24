@@ -68,6 +68,11 @@
     src: file_list.txt.j2
     dest: "{{ target_dir }}/file_list.txt"
 
+- name: Create directory list
+  ansible.builtin.template:
+    src: dir_list.txt.j2
+    dest: "{{ target_dir }}/dir_list.txt"
+
 - name: Create rsync script
   ansible.builtin.copy:
     dest: "{{ target_dir }}/rsync_copy.sh"
@@ -75,7 +80,10 @@
     content: |
       #!/bin/bash
       cd {{ target_dir }}
-      cat file_list.txt | xargs -i bash -c 'mkdir -p {}'
+      # Create directories only for directory paths
+      cat dir_list.txt | xargs -i bash -c 'mkdir -p {}'
+      # Run rsync on all paths
+      cat dir_list.txt | xargs -i bash -c "rsync -e 'ssh -i ~/.ssh/rsync.pem' -zrtlv --delete bioc-rsync@master.bioconductor.org:{}/ {}"
       cat file_list.txt | xargs -i bash -c "rsync -e 'ssh -i ~/.ssh/rsync.pem' -zrtlv --delete bioc-rsync@master.bioconductor.org:{} {}"
   register: rsync_script
 
@@ -92,10 +100,4 @@
     content: |
       #!/bin/bash
       cd {{ target_dir }}
-      cat file_list.txt | xargs -i rclone copyto -vvv ./{} osn:/bir190004-bucket01/archive.bioconductor.org/packages/{}
-
-- name: Execute rclone copy
-  ansible.builtin.shell: "{{ target_dir }}/rclone_copy.sh"
-  register: rclone_result
-  args:
-    executable: /bin/bash
+      rclone copyto -vvv ./{{ bioc_version }} osn:/bir190004-bucket01/archive.bioconductor.org/packages/{{ bioc_version }}
